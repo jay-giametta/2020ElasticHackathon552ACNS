@@ -1,0 +1,47 @@
+PUT _ingest/pipeline/suricata-master
+{
+	"description" : "Ingests suricata data and runs child pipelines",
+    "processors": [
+		{
+			"pipeline": {
+				"name": "suricata-get_related_source_dest"
+			}
+		}		
+    ]
+}
+
+PUT _ingest/pipeline/suricata-get_related_source_dest
+{
+    "description" : "Ingests suricata data and adds @meta.related_ips field",
+    "processors": [
+		{
+			"set": {
+				"field": "@meta.related_ips",
+				"value": ["{{src_ip}}","{{dest_ip}}"]
+			}
+		}	
+    ]
+}
+
+POST _reindex
+{
+	"source": {
+		"index": "suricata"
+	},
+	"dest": {
+		"index": "backup_suricata"
+	}
+}
+
+POST _reindex
+{
+	"source": {
+		"index": "suricata"
+	},
+	"dest": {
+		"index": "suricata_processed",
+		"pipeline": "suricata-master"
+	}
+}
+
+DELETE suricata
