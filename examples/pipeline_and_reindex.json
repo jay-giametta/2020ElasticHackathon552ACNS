@@ -1,0 +1,108 @@
+PUT /_template/pipe-filebeat
+{
+	"template": "pipe-filebeat*",
+	"mappings": {
+		"properties": {
+			"system.auth.ip": { 
+				"type": "ip"
+			},
+			"system.auth.ssh.ip": { 
+				"type": "ip"
+			}
+		}
+	}
+}
+
+PUT _ingest/pipeline/filebeat-master
+{
+	"description" : "Ingests previous filebeat index and adds source.ip field",
+    "processors": [
+		{
+			"pipeline": {
+				"name": "filebeat-source-ip"
+			}
+		},
+		{
+			"pipeline": {
+				"name": "filebeat-source-session-closed"
+			}
+		},
+		{
+			"pipeline": {
+				"name": "filebeat-source-session-opened"
+			}
+		}
+		
+    ]
+}
+
+PUT _ingest/pipeline/filebeat-source-ip
+{
+    "description" : "Reads system.auth.hostname field and adds system.auth.ip.ip field",
+    "processors": [
+		{
+			"grok": {
+				"field": "system.auth.hostname",
+				"patterns": ["ip-%{GREEDYDATA:system.auth.ip}"]
+			},
+			"gsub": {
+				"field": "system.auth.ip",
+				"pattern": "-",
+				"replacement": "."
+			}
+		}	
+    ]
+}
+
+PUT _ingest/pipeline/filebeat-source-session-opened
+{
+    "description" : "Matches 'session opened' string and reads system.auth.message and adds session details",
+    "processors": [
+		{
+			"grok": {
+				"if": """
+					String session_status = ctx.system.auth.message; 
+					if(session_status != null && session_status.contains('session opened')){
+						return true;
+					}
+					return false;
+					""",
+				"field": "system.auth.message",
+				"patterns": ["pam_unix\\(%{DATA:system.auth.type}\\): session %{DATA:session.status} for user %{DATA:system.auth.user} by"],
+				"ignore_failure": true
+			}
+		}
+    ]
+}
+
+PUT _ingest/pipeline/filebeat-source-session-closed
+{
+    "description" : "Matches 'session closed' string and reads system.auth.message and adds session details",
+    "processors": [
+		{
+			"grok": {
+				"if": """
+					String session_status = ctx.system.auth.message; 
+					if(session_status != null && session_status.contains('session closed')){
+						return true;
+					}
+					return false;
+				""",
+				"field": "system.auth.message",
+				"patterns": ["pam_unix\\(%{DATA:system.auth.type}\\): session %{DATA:session.status} for user %{GREEDYDATA:system.auth.user}"],
+				"ignore_failure": true
+			}
+		}
+    ]
+}
+
+POST _reindex
+{
+	"source": {
+		"index": "filebeat-2020"
+	},
+	"dest": {
+		"index": "pipe-filebeat-2020",
+		"pipeline": "filebeat-master"
+	}
+}
